@@ -41,7 +41,7 @@ struct AncestorsRequest {
     limit: Option<usize>,
 }
 
-fn latest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> impl Responder {
+fn deepest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> impl Responder {
     let db = data.lock().unwrap();
 
     let deepest_events = get_deepest_events(&path, &db.connection);
@@ -69,14 +69,14 @@ fn ancestors(
     let db = data.lock().unwrap();
     let limit = query.limit.unwrap_or(10);
 
-    let latest_events: Vec<String> = query
+    let deepest_events: Vec<String> = query
         .from
         .as_str()
         .split(',')
         .map(|id| id.to_string())
         .collect();
 
-    let ancestor_events = get_ancestor_events(&path, &db.connection, &latest_events, limit);
+    let ancestor_events = get_ancestor_events(&path, &db.connection, &deepest_events, limit);
     let event_bodies: Vec<_> = ancestor_events
         .iter()
         .map(|id| get_json(id, &db.connection).expect("Failed to get event's JSON"))
@@ -118,11 +118,11 @@ fn get_deepest_events(room_id: &str, conn: &Connection) -> Vec<String> {
 fn get_ancestor_events(
     room_id: &str,
     conn: &Connection,
-    latest_events: &Vec<String>,
+    deepest_events: &Vec<String>,
     limit: usize,
 ) -> HashSet<String> {
     let mut seen_events: HashSet<String> = HashSet::new();
-    let mut front: HashSet<String> = latest_events.iter().cloned().collect();
+    let mut front: HashSet<String> = deepest_events.iter().cloned().collect();
     let mut event_results: HashSet<String> = HashSet::new();
 
     while !front.is_empty() && event_results.len() < limit {
@@ -180,7 +180,7 @@ fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .register_data(db.clone())
-            .service(web::resource("/visualisations/latest/{roomId}").to(latest))
+            .service(web::resource("/visualisations/deepest/{roomId}").to(deepest))
             .service(web::resource("/visualisations/ancestors/{roomId}").to(ancestors))
     })
     .bind("127.0.0.1:8088")?
