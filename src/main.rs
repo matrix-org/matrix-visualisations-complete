@@ -49,6 +49,10 @@ struct ResponseObject {
 fn deepest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> impl Responder {
     let db = data.lock().unwrap();
 
+    if !room_exists(&path, &db.connection) {
+        return HttpResponse::NotFound().body("This room doesn't exist");
+    }
+
     let deepest_events = get_deepest_events(&path, &db.connection);
     let event_bodies: Vec<Event> = deepest_events
         .iter()
@@ -62,19 +66,15 @@ fn deepest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> imp
         })
         .collect();
 
-    if event_bodies.is_empty() {
-        HttpResponse::NotFound().body("This room doesn't exist")
-    } else {
-        let response_object = ResponseObject {
-            events: event_bodies,
-        };
-        let response_string = serde_json::to_string(&response_object)
-            .expect("Failed to serialize the response object");
+    let response_object = ResponseObject {
+        events: event_bodies,
+    };
+    let response_string =
+        serde_json::to_string(&response_object).expect("Failed to serialize the response object");
 
-        HttpResponse::Ok()
-            .content_type("application/json")
-            .body(response_string)
-    }
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(response_string)
 }
 
 fn ancestors(
@@ -86,6 +86,10 @@ fn ancestors(
 ) -> impl Responder {
     let db = data.lock().unwrap();
     let limit = query.limit.unwrap_or(10);
+
+    if !room_exists(&path, &db.connection) {
+        return HttpResponse::NotFound().body("This room doesn't exist");
+    }
 
     let deepest_events: Vec<String> = query
         .from
@@ -116,6 +120,19 @@ fn ancestors(
     HttpResponse::Ok()
         .content_type("application/json")
         .body(response_string)
+}
+
+fn room_exists(room_id: &str, conn: &Connection) -> bool {
+    let nb_ev = conn
+        .query(
+            &format!("SELECT * FROM events WHERE room_id = '{}'", room_id),
+            &[],
+        )
+        .unwrap()
+        .iter()
+        .count();
+
+    nb_ev > 0
 }
 
 fn get_deepest_events(room_id: &str, conn: &Connection) -> Vec<String> {
