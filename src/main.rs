@@ -36,7 +36,7 @@ struct Event {
 }
 
 #[derive(Clone, Deserialize)]
-struct AncestorsRequest {
+struct RequestQuery {
     from: String,
     limit: Option<usize>,
 }
@@ -80,7 +80,7 @@ fn deepest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> imp
 fn ancestors(
     (path, query, data): (
         web::Path<String>,
-        web::Query<AncestorsRequest>,
+        web::Query<RequestQuery>,
         web::Data<Mutex<Database>>,
     ),
 ) -> impl Responder {
@@ -100,6 +100,51 @@ fn ancestors(
 
     let ancestor_events = get_ancestor_events(&path, &db.connection, &deepest_events, limit);
     let event_bodies: Vec<Event> = ancestor_events
+        .iter()
+        .map(|id| {
+            let ev: Event = serde_json::from_value(
+                get_json(id, &db.connection).expect("Failed to get event's JSON"),
+            )
+            .expect("Failed to deserialize Event");
+
+            ev
+        })
+        .collect();
+
+    let response_object = ResponseObject {
+        events: event_bodies,
+    };
+    let response_string =
+        serde_json::to_string(&response_object).expect("Failed to serialize the response object");
+
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(response_string)
+}
+
+fn descendants(
+    (path, query, data): (
+        web::Path<String>,
+        web::Query<RequestQuery>,
+        web::Data<Mutex<Database>>,
+    ),
+) -> impl Responder {
+    let db = data.lock().unwrap();
+    let limit = query.limit.unwrap_or(10);
+
+    if !room_exists(&path, &db.connection) {
+        return HttpResponse::NotFound().body("This room doesn't exist");
+    }
+
+    let highest_events: Vec<String> = query
+        .from
+        .as_str()
+        .split(',')
+        .map(|id| id.to_string())
+        .collect();
+
+    let descendant_events = get_descendants_events(&path, &db.connection, &highest_events, limit);
+    let event_bodies: Vec<Event> = descendant_events
         .iter()
         .map(|id| {
             let ev: Event = serde_json::from_value(
@@ -204,6 +249,47 @@ fn get_ancestor_events(
     event_results
 }
 
+fn get_descendants_events(
+    room_id: &str,
+    conn: &Connection,
+    highest_events: &Vec<String>,
+    limit: usize,
+) -> HashSet<String> {
+    let mut seen_events: HashSet<String> = HashSet::new();
+    let mut front: HashSet<String> = highest_events.iter().cloned().collect();
+    let mut event_results: HashSet<String> = HashSet::new();
+
+    while !front.is_empty() && event_results.len() < limit {
+        let mut new_front: HashSet<String> = HashSet::new();
+
+        for event_id in front.iter() {
+            let new_results: HashSet<String> = conn
+                .query(
+                    &format!(
+                        "SELECT event_id FROM event_edges WHERE room_id = '{}' AND prev_event_id = '{}' AND is_state = False LIMIT {}",
+                        room_id, event_id, limit - event_results.len(),
+                    ),
+                    &[],
+                )
+                .unwrap()
+                .iter()
+                .map(|row| row.get("event_id"))
+                .filter(|id| !seen_events.contains(id))
+                .collect();
+
+            new_results.iter().for_each(|id| {
+                new_front.insert(id.to_string());
+                seen_events.insert(id.to_string());
+                event_results.insert(id.to_string());
+            });
+        }
+
+        front = new_front;
+    }
+
+    event_results
+}
+
 fn get_json(id: &str, conn: &Connection) -> Option<JsonValue> {
     let json_str: Option<String> = conn
         .query(
@@ -230,6 +316,7 @@ fn main() -> std::io::Result<()> {
             .register_data(db.clone())
             .service(web::resource("/visualisations/deepest/{roomId}").to(deepest))
             .service(web::resource("/visualisations/ancestors/{roomId}").to(ancestors))
+            .service(web::resource("/visualisations/descendants/{roomId}").to(descendants))
     })
     .bind("127.0.0.1:8088")?
     .run()
