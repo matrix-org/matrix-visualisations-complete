@@ -41,21 +41,39 @@ struct AncestorsRequest {
     limit: Option<usize>,
 }
 
+#[derive(Clone, Serialize)]
+struct ResponseObject {
+    events: Vec<Event>,
+}
+
 fn deepest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> impl Responder {
     let db = data.lock().unwrap();
 
     let deepest_events = get_deepest_events(&path, &db.connection);
-    let event_bodies: Vec<_> = deepest_events
+    let event_bodies: Vec<Event> = deepest_events
         .iter()
-        .map(|id| get_json(id, &db.connection).expect("Failed to get event's JSON"))
+        .map(|id| {
+            let ev: Event = serde_json::from_value(
+                get_json(id, &db.connection).expect("Failed to get event's JSON"),
+            )
+            .expect("Failed to deserialize Event");
+
+            ev
+        })
         .collect();
 
     if event_bodies.is_empty() {
         HttpResponse::NotFound().body("This room doesn't exist")
     } else {
+        let response_object = ResponseObject {
+            events: event_bodies,
+        };
+        let response_string = serde_json::to_string(&response_object)
+            .expect("Failed to serialize the response object");
+
         HttpResponse::Ok()
             .content_type("application/json")
-            .body(serde_json::to_string(&event_bodies).expect("Failed to serialize Event"))
+            .body(response_string)
     }
 }
 
@@ -77,14 +95,27 @@ fn ancestors(
         .collect();
 
     let ancestor_events = get_ancestor_events(&path, &db.connection, &deepest_events, limit);
-    let event_bodies: Vec<_> = ancestor_events
+    let event_bodies: Vec<Event> = ancestor_events
         .iter()
-        .map(|id| get_json(id, &db.connection).expect("Failed to get event's JSON"))
+        .map(|id| {
+            let ev: Event = serde_json::from_value(
+                get_json(id, &db.connection).expect("Failed to get event's JSON"),
+            )
+            .expect("Failed to deserialize Event");
+
+            ev
+        })
         .collect();
+
+    let response_object = ResponseObject {
+        events: event_bodies,
+    };
+    let response_string =
+        serde_json::to_string(&response_object).expect("Failed to serialize the response object");
 
     HttpResponse::Ok()
         .content_type("application/json")
-        .body(serde_json::to_string(&event_bodies).expect("Failed to serialize Event"))
+        .body(response_string)
 }
 
 fn get_deepest_events(room_id: &str, conn: &Connection) -> Vec<String> {
