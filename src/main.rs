@@ -4,7 +4,7 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashSet;
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use r2d2::Pool;
@@ -47,8 +47,8 @@ struct ResponseObject {
     events: Vec<Event>,
 }
 
-fn deepest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> impl Responder {
-    let db = data.lock().unwrap();
+fn deepest((path, data): (web::Path<String>, web::Data<RwLock<Database>>)) -> impl Responder {
+    let db = data.read().unwrap();
 
     if !room_exists(&path, &db.pg_pool) {
         return HttpResponse::NotFound().body("This room doesn't exist");
@@ -82,10 +82,10 @@ fn ancestors(
     (path, query, data): (
         web::Path<String>,
         web::Query<RequestQuery>,
-        web::Data<Mutex<Database>>,
+        web::Data<RwLock<Database>>,
     ),
 ) -> impl Responder {
-    let db = data.lock().unwrap();
+    let db = data.read().unwrap();
     let limit = query.limit.unwrap_or(10);
 
     if !room_exists(&path, &db.pg_pool) {
@@ -127,10 +127,10 @@ fn descendants(
     (path, query, data): (
         web::Path<String>,
         web::Query<RequestQuery>,
-        web::Data<Mutex<Database>>,
+        web::Data<RwLock<Database>>,
     ),
 ) -> impl Responder {
-    let db = data.lock().unwrap();
+    let db = data.read().unwrap();
     let limit = query.limit.unwrap_or(10);
 
     if !room_exists(&path, &db.pg_pool) {
@@ -326,7 +326,7 @@ fn main() -> std::io::Result<()> {
             .unwrap();
     let pg_pool = r2d2::Pool::new(manager).expect("Failed to create pool");
 
-    let db = web::Data::new(Mutex::new(Database { pg_pool }));
+    let db = web::Data::new(RwLock::new(Database { pg_pool }));
 
     HttpServer::new(move || {
         App::new()
