@@ -47,6 +47,7 @@ struct ResponseObject {
     events: Vec<Event>,
 }
 
+// Handler for the `/visualisations/deepest/{roomId}` request
 fn deepest((path, data): (web::Path<String>, web::Data<RwLock<Database>>)) -> impl Responder {
     let db = data.read().unwrap();
 
@@ -78,6 +79,7 @@ fn deepest((path, data): (web::Path<String>, web::Data<RwLock<Database>>)) -> im
         .body(response_string)
 }
 
+// Handler for the `/visualisations/ancestors/{roomId}` request
 fn ancestors(
     (path, query, data): (
         web::Path<String>,
@@ -92,6 +94,7 @@ fn ancestors(
         return HttpResponse::NotFound().body("This room doesn't exist");
     }
 
+    // Parse from the query the events from which we will get the ancestors
     let deepest_events: Vec<String> = query
         .from
         .as_str()
@@ -123,6 +126,7 @@ fn ancestors(
         .body(response_string)
 }
 
+// Handler for the `/visualisations/descendants/{roomId}` request
 fn descendants(
     (path, query, data): (
         web::Path<String>,
@@ -137,6 +141,7 @@ fn descendants(
         return HttpResponse::NotFound().body("This room doesn't exist");
     }
 
+    // Parse from the query the events from which we will get the descendants
     let highest_events: Vec<String> = query
         .from
         .as_str()
@@ -168,6 +173,7 @@ fn descendants(
         .body(response_string)
 }
 
+// Makes a request to the database to check whether the room `room_id` exists
 fn room_exists(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> bool {
     let pool = pg_pool.clone();
     let client = pool.get().unwrap();
@@ -183,6 +189,7 @@ fn room_exists(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> bool
     nb_ev > 0
 }
 
+// Makes requests to the database to get the events with the greatest depth of the room `room_id`
 fn get_deepest_events(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> Vec<String> {
     let pool = pg_pool.clone();
     let client = pool.get().unwrap();
@@ -215,6 +222,7 @@ fn get_deepest_events(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) 
         .collect()
 }
 
+// Makes requests to the database to get `limit` ancestors of a set `deepest_events` of events
 fn get_ancestor_events(
     room_id: &str,
     pg_pool: &Pool<PostgresConnectionManager>,
@@ -259,6 +267,7 @@ fn get_ancestor_events(
     event_results
 }
 
+// Makes requests to the database to get `limit` descendants of a set `highest_events` of events
 fn get_descendants_events(
     room_id: &str,
     pg_pool: &Pool<PostgresConnectionManager>,
@@ -303,6 +312,7 @@ fn get_descendants_events(
     event_results
 }
 
+// Makes a request to the database to get the JSON body of the event `id`
 fn get_json(id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> Option<JsonValue> {
     let pool = pg_pool.clone();
     let client = pool.get().unwrap();
@@ -330,7 +340,7 @@ fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .register_data(db.clone())
+            .register_data(db.clone()) // The database connection manager will be shared by all the handlers
             .service(web::resource("/visualisations/deepest/{roomId}").to(deepest))
             .service(web::resource("/visualisations/ancestors/{roomId}").to(ancestors))
             .service(web::resource("/visualisations/descendants/{roomId}").to(descendants))
