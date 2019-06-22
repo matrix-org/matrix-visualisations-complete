@@ -1,5 +1,5 @@
 extern crate actix_web;
-extern crate postgres;
+extern crate r2d2_postgres;
 extern crate serde_derive;
 extern crate serde_json;
 
@@ -7,12 +7,13 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use postgres::{Connection, TlsMode};
+use r2d2::Pool;
+use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 struct Database {
-    connection: Connection,
+    pg_pool: Pool<PostgresConnectionManager>,
 }
 
 #[derive(Default, Clone, Deserialize, Serialize)]
@@ -49,16 +50,16 @@ struct ResponseObject {
 fn deepest((path, data): (web::Path<String>, web::Data<Mutex<Database>>)) -> impl Responder {
     let db = data.lock().unwrap();
 
-    if !room_exists(&path, &db.connection) {
+    if !room_exists(&path, &db.pg_pool) {
         return HttpResponse::NotFound().body("This room doesn't exist");
     }
 
-    let deepest_events = get_deepest_events(&path, &db.connection);
+    let deepest_events = get_deepest_events(&path, &db.pg_pool);
     let event_bodies: Vec<Event> = deepest_events
         .iter()
         .map(|id| {
             let ev: Event = serde_json::from_value(
-                get_json(id, &db.connection).expect("Failed to get event's JSON"),
+                get_json(id, &db.pg_pool).expect("Failed to get event's JSON"),
             )
             .expect("Failed to deserialize Event");
 
@@ -87,7 +88,7 @@ fn ancestors(
     let db = data.lock().unwrap();
     let limit = query.limit.unwrap_or(10);
 
-    if !room_exists(&path, &db.connection) {
+    if !room_exists(&path, &db.pg_pool) {
         return HttpResponse::NotFound().body("This room doesn't exist");
     }
 
@@ -98,12 +99,12 @@ fn ancestors(
         .map(|id| id.to_string())
         .collect();
 
-    let ancestor_events = get_ancestor_events(&path, &db.connection, &deepest_events, limit);
+    let ancestor_events = get_ancestor_events(&path, &db.pg_pool, &deepest_events, limit);
     let event_bodies: Vec<Event> = ancestor_events
         .iter()
         .map(|id| {
             let ev: Event = serde_json::from_value(
-                get_json(id, &db.connection).expect("Failed to get event's JSON"),
+                get_json(id, &db.pg_pool).expect("Failed to get event's JSON"),
             )
             .expect("Failed to deserialize Event");
 
@@ -132,7 +133,7 @@ fn descendants(
     let db = data.lock().unwrap();
     let limit = query.limit.unwrap_or(10);
 
-    if !room_exists(&path, &db.connection) {
+    if !room_exists(&path, &db.pg_pool) {
         return HttpResponse::NotFound().body("This room doesn't exist");
     }
 
@@ -143,12 +144,12 @@ fn descendants(
         .map(|id| id.to_string())
         .collect();
 
-    let descendant_events = get_descendants_events(&path, &db.connection, &highest_events, limit);
+    let descendant_events = get_descendants_events(&path, &db.pg_pool, &highest_events, limit);
     let event_bodies: Vec<Event> = descendant_events
         .iter()
         .map(|id| {
             let ev: Event = serde_json::from_value(
-                get_json(id, &db.connection).expect("Failed to get event's JSON"),
+                get_json(id, &db.pg_pool).expect("Failed to get event's JSON"),
             )
             .expect("Failed to deserialize Event");
 
@@ -167,21 +168,26 @@ fn descendants(
         .body(response_string)
 }
 
-fn room_exists(room_id: &str, conn: &Connection) -> bool {
-    let nb_ev = conn
+fn room_exists(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> bool {
+    let pool = pg_pool.clone();
+    let client = pool.get().unwrap();
+
+    let nb_ev = client
         .query(
             &format!("SELECT * FROM events WHERE room_id = '{}'", room_id),
             &[],
         )
         .unwrap()
-        .iter()
-        .count();
+        .len();
 
     nb_ev > 0
 }
 
-fn get_deepest_events(room_id: &str, conn: &Connection) -> Vec<String> {
-    let max_depth: i64 = conn
+fn get_deepest_events(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> Vec<String> {
+    let pool = pg_pool.clone();
+    let client = pool.get().unwrap();
+
+    let max_depth: i64 = client
         .query(
             &format!(
                 "SELECT MAX(depth) FROM events WHERE room_id = '{}'",
@@ -195,22 +201,23 @@ fn get_deepest_events(room_id: &str, conn: &Connection) -> Vec<String> {
         .expect("Failed to get max_depth")
         .get("max");
 
-    conn.query(
-        &format!(
-            "SELECT event_id FROM events WHERE room_id = '{}' AND depth = {}",
-            room_id, max_depth
-        ),
-        &[],
-    )
-    .unwrap()
-    .iter()
-    .map(|row| row.get("event_id"))
-    .collect()
+    client
+        .query(
+            &format!(
+                "SELECT event_id FROM events WHERE room_id = '{}' AND depth = {}",
+                room_id, max_depth
+            ),
+            &[],
+        )
+        .unwrap()
+        .iter()
+        .map(|row| row.get("event_id"))
+        .collect()
 }
 
 fn get_ancestor_events(
     room_id: &str,
-    conn: &Connection,
+    pg_pool: &Pool<PostgresConnectionManager>,
     deepest_events: &Vec<String>,
     limit: usize,
 ) -> HashSet<String> {
@@ -222,7 +229,10 @@ fn get_ancestor_events(
         let mut new_front: HashSet<String> = HashSet::new();
 
         for event_id in front.iter() {
-            let new_results: HashSet<String> = conn
+            let pool = pg_pool.clone();
+            let client = pool.get().unwrap();
+
+            let new_results: HashSet<String> = client
                 .query(
                     &format!(
                         "SELECT prev_event_id FROM event_edges WHERE room_id = '{}' AND event_id = '{}' AND is_state = False LIMIT {}",
@@ -251,7 +261,7 @@ fn get_ancestor_events(
 
 fn get_descendants_events(
     room_id: &str,
-    conn: &Connection,
+    pg_pool: &Pool<PostgresConnectionManager>,
     highest_events: &Vec<String>,
     limit: usize,
 ) -> HashSet<String> {
@@ -263,7 +273,10 @@ fn get_descendants_events(
         let mut new_front: HashSet<String> = HashSet::new();
 
         for event_id in front.iter() {
-            let new_results: HashSet<String> = conn
+            let pool = pg_pool.clone();
+            let client = pool.get().unwrap();
+
+            let new_results: HashSet<String> = client
                 .query(
                     &format!(
                         "SELECT event_id FROM event_edges WHERE room_id = '{}' AND prev_event_id = '{}' AND is_state = False LIMIT {}",
@@ -290,8 +303,11 @@ fn get_descendants_events(
     event_results
 }
 
-fn get_json(id: &str, conn: &Connection) -> Option<JsonValue> {
-    let json_str: Option<String> = conn
+fn get_json(id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> Option<JsonValue> {
+    let pool = pg_pool.clone();
+    let client = pool.get().unwrap();
+
+    let json_str: Option<String> = client
         .query(
             &format!("SELECT json FROM event_json WHERE event_id = '{}'", id),
             &[],
@@ -305,11 +321,12 @@ fn get_json(id: &str, conn: &Connection) -> Option<JsonValue> {
 }
 
 fn main() -> std::io::Result<()> {
-    let connection =
-        Connection::connect("postgresql://synapse_user@localhost/synapse", TlsMode::None)
-            .expect("Failed to connect to database");
+    let manager =
+        PostgresConnectionManager::new("postgres://synapse_user@localhost/synapse", TlsMode::None)
+            .unwrap();
+    let pg_pool = r2d2::Pool::new(manager).expect("Failed to create pool");
 
-    let db = web::Data::new(Mutex::new(Database { connection }));
+    let db = web::Data::new(Mutex::new(Database { pg_pool }));
 
     HttpServer::new(move || {
         App::new()
