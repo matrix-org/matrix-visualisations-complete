@@ -4,7 +4,6 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashSet;
-use std::sync::RwLock;
 
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use r2d2::Pool;
@@ -48,9 +47,7 @@ struct ResponseObject {
 }
 
 // Handler for the `/visualisations/deepest/{roomId}` request
-fn deepest((path, data): (web::Path<String>, web::Data<RwLock<Database>>)) -> impl Responder {
-    let db = data.read().unwrap();
-
+fn deepest((path, db): (web::Path<String>, web::Data<Database>)) -> impl Responder {
     if !room_exists(&path, &db.pg_pool) {
         return HttpResponse::NotFound().body("This room doesn't exist");
     }
@@ -81,13 +78,12 @@ fn deepest((path, data): (web::Path<String>, web::Data<RwLock<Database>>)) -> im
 
 // Handler for the `/visualisations/ancestors/{roomId}` request
 fn ancestors(
-    (path, query, data): (
+    (path, query, db): (
         web::Path<String>,
         web::Query<RequestQuery>,
-        web::Data<RwLock<Database>>,
+        web::Data<Database>,
     ),
 ) -> impl Responder {
-    let db = data.read().unwrap();
     let limit = query.limit.unwrap_or(10);
 
     if !room_exists(&path, &db.pg_pool) {
@@ -128,13 +124,12 @@ fn ancestors(
 
 // Handler for the `/visualisations/descendants/{roomId}` request
 fn descendants(
-    (path, query, data): (
+    (path, query, db): (
         web::Path<String>,
         web::Query<RequestQuery>,
-        web::Data<RwLock<Database>>,
+        web::Data<Database>,
     ),
 ) -> impl Responder {
-    let db = data.read().unwrap();
     let limit = query.limit.unwrap_or(10);
 
     if !room_exists(&path, &db.pg_pool) {
@@ -322,7 +317,7 @@ fn main() -> std::io::Result<()> {
             .unwrap();
     let pg_pool = r2d2::Pool::new(manager).expect("Failed to create pool");
 
-    let db = web::Data::new(RwLock::new(Database { pg_pool }));
+    let db = web::Data::new(Database { pg_pool });
 
     HttpServer::new(move || {
         App::new()
