@@ -179,10 +179,7 @@ fn room_exists(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> bool
     let client = pool.get().unwrap();
 
     let nb_ev = client
-        .query(
-            &format!("SELECT * FROM events WHERE room_id = '{}'", room_id),
-            &[],
-        )
+        .query("SELECT * FROM events WHERE room_id = $1", &[&room_id])
         .unwrap()
         .len();
 
@@ -196,11 +193,8 @@ fn get_deepest_events(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) 
 
     let max_depth: i64 = client
         .query(
-            &format!(
-                "SELECT MAX(depth) FROM events WHERE room_id = '{}'",
-                room_id
-            ),
-            &[],
+            "SELECT MAX(depth) FROM events WHERE room_id = $1",
+            &[&room_id],
         )
         .unwrap()
         .iter()
@@ -210,11 +204,8 @@ fn get_deepest_events(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) 
 
     client
         .query(
-            &format!(
-                "SELECT event_id FROM events WHERE room_id = '{}' AND depth = {}",
-                room_id, max_depth
-            ),
-            &[],
+            "SELECT event_id FROM events WHERE room_id = $1 AND depth = $2",
+            &[&room_id, &max_depth],
         )
         .unwrap()
         .iter()
@@ -240,13 +231,12 @@ fn get_ancestor_events(
             let pool = pg_pool.clone();
             let client = pool.get().unwrap();
 
+            let query_limit = limit - event_results.len();
+
             let new_results: HashSet<String> = client
                 .query(
-                    &format!(
-                        "SELECT prev_event_id FROM event_edges WHERE room_id = '{}' AND event_id = '{}' AND is_state = False LIMIT {}",
-                        room_id, event_id, limit - event_results.len(),
-                    ),
-                    &[],
+                    "SELECT prev_event_id FROM event_edges WHERE room_id = $1 AND event_id = $2 AND is_state = False LIMIT $3",
+                    &[&room_id, &event_id, &(query_limit as i64)],
                 )
                 .unwrap()
                 .iter()
@@ -285,13 +275,12 @@ fn get_descendants_events(
             let pool = pg_pool.clone();
             let client = pool.get().unwrap();
 
+            let query_limit = limit - event_results.len();
+
             let new_results: HashSet<String> = client
                 .query(
-                    &format!(
-                        "SELECT event_id FROM event_edges WHERE room_id = '{}' AND prev_event_id = '{}' AND is_state = False LIMIT {}",
-                        room_id, event_id, limit - event_results.len(),
-                    ),
-                    &[],
+                    "SELECT event_id FROM event_edges WHERE room_id = $1 AND prev_event_id = $2 AND is_state = False LIMIT $3",
+                    &[&room_id, &event_id, &(query_limit as i64)],
                 )
                 .unwrap()
                 .iter()
@@ -318,10 +307,7 @@ fn get_json(id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> Option<JsonV
     let client = pool.get().unwrap();
 
     let json_str: Option<String> = client
-        .query(
-            &format!("SELECT json FROM event_json WHERE event_id = '{}'", id),
-            &[],
-        )
+        .query("SELECT json FROM event_json WHERE event_id = $1", &[&id])
         .unwrap()
         .iter()
         .next()
