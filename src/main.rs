@@ -5,7 +5,7 @@ extern crate serde_json;
 
 use std::collections::HashSet;
 
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{guard, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use r2d2::Pool;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 use serde_derive::{Deserialize, Serialize};
@@ -49,7 +49,14 @@ struct ResponseObject {
 // Handler for the `/visualisations/deepest/{roomId}` request
 fn deepest((path, db): (web::Path<String>, web::Data<Database>)) -> impl Responder {
     if !room_exists(&path, &db.pg_pool) {
-        return HttpResponse::NotFound().body("This room doesn't exist");
+        return HttpResponse::NotFound()
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body("This room doesn't exist");
     }
 
     let deepest_events = get_deepest_events(&path, &db.pg_pool);
@@ -73,6 +80,12 @@ fn deepest((path, db): (web::Path<String>, web::Data<Database>)) -> impl Respond
 
     HttpResponse::Ok()
         .content_type("application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Methods", "GET, POST")
+        .header(
+            "Access-Control-Allow-Headers",
+            "Origin, X-Requested-With, Content-Type, Accept",
+        )
         .body(response_string)
 }
 
@@ -87,7 +100,14 @@ fn ancestors(
     let limit = query.limit.unwrap_or(10);
 
     if !room_exists(&path, &db.pg_pool) {
-        return HttpResponse::NotFound().body("This room doesn't exist");
+        return HttpResponse::NotFound()
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body("This room doesn't exist");
     }
 
     // Parse from the query the events from which we will get the ancestors
@@ -119,6 +139,12 @@ fn ancestors(
 
     HttpResponse::Ok()
         .content_type("application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Methods", "GET, POST")
+        .header(
+            "Access-Control-Allow-Headers",
+            "Origin, X-Requested-With, Content-Type, Accept",
+        )
         .body(response_string)
 }
 
@@ -133,7 +159,14 @@ fn descendants(
     let limit = query.limit.unwrap_or(10);
 
     if !room_exists(&path, &db.pg_pool) {
-        return HttpResponse::NotFound().body("This room doesn't exist");
+        return HttpResponse::NotFound()
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body("This room doesn't exist");
     }
 
     // Parse from the query the events from which we will get the descendants
@@ -165,6 +198,12 @@ fn descendants(
 
     HttpResponse::Ok()
         .content_type("application/json")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Access-Control-Allow-Methods", "GET, POST")
+        .header(
+            "Access-Control-Allow-Headers",
+            "Origin, X-Requested-With, Content-Type, Accept",
+        )
         .body(response_string)
 }
 
@@ -322,6 +361,19 @@ fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .register_data(db.clone()) // The database connection manager will be shared by all the handlers
+            .route(
+                "/visualisations/*",
+                web::route().guard(guard::Options()).to(|_: HttpRequest| {
+                    HttpResponse::Ok()
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Access-Control-Allow-Methods", "GET, POST")
+                        .header(
+                            "Access-Control-Allow-Headers",
+                            "Origin, X-Requested-With, Content-Type, Accept",
+                        )
+                        .body("")
+                }),
+            )
             .service(web::resource("/visualisations/deepest/{roomId}").to(deepest))
             .service(web::resource("/visualisations/ancestors/{roomId}").to(ancestors))
             .service(web::resource("/visualisations/descendants/{roomId}").to(descendants))
