@@ -4,6 +4,11 @@ This backend allows
 [Matrix Visualisations](https://github.com/Kagamihime/matrix-visualisations)
 to directly communicate with the PostgreSQL database of [Synapse](https://github.com/matrix-org/synapse).
 
+## Warning
+
+This is a prototype and there is no authentication system to prevent anyone
+from retrieving any events from the database linked to it.
+So please **do not** use this with an homeserver in production.
 
 ## HTTP REST API
 
