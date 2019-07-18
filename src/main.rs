@@ -23,6 +23,18 @@ struct Database {
     pg_pool: Pool<PostgresConnectionManager>,
 }
 
+struct FederationData {
+    cpu_pool: CpuPool,
+
+    target: String,
+    room_id: String,
+
+    server_name: String,
+    username: String,
+
+    connected: bool,
+}
+
 #[derive(Default, Clone, Deserialize, Serialize)]
 struct Event {
     room_id: String,       // Room identifier
@@ -441,6 +453,44 @@ fn get_json(id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> Option<JsonV
     json_str.map(|json_str| serde_json::from_str(&json_str).expect("Failed to deserialize Event"))
 }
 
+fn federation_deepest(
+    path: web::Path<String>,
+) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    Box::new(futures::future::ok(
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body(&format!("Deepest federated event for the room: {}", path)),
+    ))
+}
+
+fn federation_stop() -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    Box::new(futures::future::ok(
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body("Stopping the federated backend"),
+    ))
+}
+
+fn federation_cert(_: web::Path<String>) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    Box::new(futures::future::ok(
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .body("The cert of the server"),
+    ))
+}
+
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = args().collect();
 
@@ -487,9 +537,50 @@ fn main() -> std::io::Result<()> {
         .bind("127.0.0.1:8088")?
         .run()
     } else if args[1] == "federation" {
+        if args.len() < 5 {
+            eprintln!("Usage: cargo run --release federation <target> <server_name> <username>");
+            exit(-1);
+        }
+
         println!("Backend in federation mode");
 
-        Ok(())
+        let cpu_pool = CpuPool::new_num_cpus();
+
+        let fd = web::Data::new(FederationData {
+            cpu_pool,
+            target: args[2].clone(),
+            room_id: String::new(),
+
+            server_name: args[3].clone(),
+            username: args[4].clone(),
+
+            connected: false,
+        });
+
+        HttpServer::new(move || {
+            App::new()
+                .register_data(fd.clone()) // Data for the federation which will be shared by all the handlers
+                .route(
+                    "/visualisations/*",
+                    web::route().guard(guard::Options()).to(|_: HttpRequest| {
+                        HttpResponse::Ok()
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header("Access-Control-Allow-Methods", "GET, POST")
+                            .header(
+                                "Access-Control-Allow-Headers",
+                                "Origin, X-Requested-With, Content-Type, Accept",
+                            )
+                            .body("")
+                    }),
+                )
+                .service(
+                    web::resource("/visualisations/deepest/{roomId}").to_async(federation_deepest),
+                )
+                .service(web::resource("/visualisations/stop").to_async(federation_stop)) // FIXME: should be done when stopping the server
+                .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(federation_cert))
+        })
+        .bind("127.0.0.1:8088")?
+        .run()
     } else {
         eprintln!("Unknown mode");
         Ok(())
