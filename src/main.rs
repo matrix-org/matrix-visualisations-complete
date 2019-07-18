@@ -6,6 +6,8 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use std::collections::HashSet;
+use std::env::args;
+use std::process::exit;
 
 use actix_web::{guard, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use futures::Future;
@@ -53,7 +55,7 @@ struct ResponseObject {
 }
 
 // Handler for the `/visualisations/deepest/{roomId}` request
-fn deepest(
+fn pg_deepest(
     (path, db): (web::Path<String>, web::Data<Database>),
 ) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
     if !room_exists(&path, &db.pg_pool) {
@@ -115,7 +117,7 @@ fn deepest(
 }
 
 // Handler for the `/visualisations/ancestors/{roomId}` request
-fn ancestors(
+fn pg_ancestors(
     (path, query, db): (
         web::Path<String>,
         web::Query<RequestQuery>,
@@ -193,7 +195,7 @@ fn ancestors(
 }
 
 // Handler for the `/visualisations/descendants/{roomId}` request
-fn descendants(
+fn pg_descendants(
     (path, query, db): (
         web::Path<String>,
         web::Query<RequestQuery>,
@@ -440,34 +442,56 @@ fn get_json(id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> Option<JsonV
 }
 
 fn main() -> std::io::Result<()> {
-    let cpu_pool = CpuPool::new_num_cpus();
-    let manager =
-        PostgresConnectionManager::new("postgres://synapse_user@localhost/synapse", TlsMode::None)
-            .unwrap();
-    let pg_pool = r2d2::Pool::new(manager).expect("Failed to create pool");
+    let args: Vec<String> = args().collect();
 
-    let db = web::Data::new(Database { cpu_pool, pg_pool });
+    if args.len() < 2 || (args[1] != "postgres" && args[1] != "federation") {
+        eprintln!("Usage: cargo run --release [postgres / federation]");
+        exit(-1);
+    }
 
-    HttpServer::new(move || {
-        App::new()
-            .register_data(db.clone()) // The database connection manager will be shared by all the handlers
-            .route(
-                "/visualisations/*",
-                web::route().guard(guard::Options()).to(|_: HttpRequest| {
-                    HttpResponse::Ok()
-                        .header("Access-Control-Allow-Origin", "*")
-                        .header("Access-Control-Allow-Methods", "GET, POST")
-                        .header(
-                            "Access-Control-Allow-Headers",
-                            "Origin, X-Requested-With, Content-Type, Accept",
-                        )
-                        .body("")
-                }),
-            )
-            .service(web::resource("/visualisations/deepest/{roomId}").to_async(deepest))
-            .service(web::resource("/visualisations/ancestors/{roomId}").to_async(ancestors))
-            .service(web::resource("/visualisations/descendants/{roomId}").to_async(descendants))
-    })
-    .bind("127.0.0.1:8088")?
-    .run()
+    if args[1] == "postgres" {
+        println!("Backend in postgres mode");
+
+        let cpu_pool = CpuPool::new_num_cpus();
+        let manager = PostgresConnectionManager::new(
+            "postgres://synapse_user@localhost/synapse",
+            TlsMode::None,
+        )
+        .unwrap();
+        let pg_pool = r2d2::Pool::new(manager).expect("Failed to create pool");
+
+        let db = web::Data::new(Database { cpu_pool, pg_pool });
+
+        HttpServer::new(move || {
+            App::new()
+                .register_data(db.clone()) // The database connection manager will be shared by all the handlers
+                .route(
+                    "/visualisations/*",
+                    web::route().guard(guard::Options()).to(|_: HttpRequest| {
+                        HttpResponse::Ok()
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header("Access-Control-Allow-Methods", "GET, POST")
+                            .header(
+                                "Access-Control-Allow-Headers",
+                                "Origin, X-Requested-With, Content-Type, Accept",
+                            )
+                            .body("")
+                    }),
+                )
+                .service(web::resource("/visualisations/deepest/{roomId}").to_async(pg_deepest))
+                .service(web::resource("/visualisations/ancestors/{roomId}").to_async(pg_ancestors))
+                .service(
+                    web::resource("/visualisations/descendants/{roomId}").to_async(pg_descendants),
+                )
+        })
+        .bind("127.0.0.1:8088")?
+        .run()
+    } else if args[1] == "federation" {
+        println!("Backend in federation mode");
+
+        Ok(())
+    } else {
+        eprintln!("Unknown mode");
+        Ok(())
+    }
 }
