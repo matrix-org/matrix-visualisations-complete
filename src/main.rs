@@ -1,9 +1,14 @@
 extern crate actix_web;
+extern crate awc;
+extern crate base64;
 extern crate futures;
 extern crate futures_cpupool;
+extern crate indolentjson;
+extern crate percent_encoding;
 extern crate r2d2_postgres;
 extern crate serde_derive;
 extern crate serde_json;
+extern crate sodiumoxide;
 
 pub mod federation;
 pub mod postgres;
