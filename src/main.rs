@@ -78,22 +78,27 @@ fn main() -> std::io::Result<()> {
         .bind("127.0.0.1:8088")?
         .run()
     } else if args[1] == "federation" {
-        if args.len() < 5 {
-            eprintln!("Usage: cargo run --release federation <target> <server_name> <username>");
+        if args.len() < 6 {
+            eprintln!("Usage: cargo run --release federation <target_addr> <target_name> <server_name> <username>");
             exit(-1);
         }
 
         println!("Backend in federation mode");
 
+        let (secret_key, key_name) = key_info(&format!("{}.signing.key", args[4].clone()));
+
         let cpu_pool = CpuPool::new_num_cpus();
 
         let fd = web::Data::new(FederationData {
             cpu_pool,
-            target: args[2].clone(),
+            target_addr: args[2].clone(),
+            target_name: args[3].clone(),
             room_id: String::new(),
 
-            server_name: args[3].clone(),
-            username: args[4].clone(),
+            server_name: args[4].clone(),
+            username: args[5].clone(),
+            secret_key,
+            key_name,
 
             connected: false,
         });
