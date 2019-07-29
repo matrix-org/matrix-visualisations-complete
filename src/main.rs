@@ -14,11 +14,15 @@ pub mod federation;
 pub mod postgres;
 
 use std::env::args;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::BufReader;
 use std::process::exit;
 
 use actix_web::{guard, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures_cpupool::CpuPool;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
+use sodiumoxide::crypto::sign::ed25519::{keypair_from_seed, SecretKey, Seed};
 
 use crate::federation::deepest as federation_deepest;
 use crate::federation::FederationData;
@@ -122,4 +126,42 @@ fn main() -> std::io::Result<()> {
         eprintln!("Unknown mode");
         Ok(())
     }
+}
+
+fn key_info(path: &str) -> (SecretKey, String) {
+    let file = File::open(path).expect("Failed to open the signing key's file");
+    let mut buf_reader = BufReader::new(file);
+    let mut contents = String::new();
+
+    buf_reader
+        .read_to_string(&mut contents)
+        .expect("Failed to read the signing key's file");
+    let key_name =
+        contents
+            .as_str()
+            .split_ascii_whitespace()
+            .take(2)
+            .fold(String::new(), |acc, x| {
+                if acc.is_empty() {
+                    x.to_string()
+                } else {
+                    acc + ":" + x
+                }
+            });
+
+    let seed = contents
+        .as_str()
+        .split_ascii_whitespace()
+        .nth(2)
+        .expect("No seed found in the signing key's file");
+    let seed = Seed::from_slice(
+        base64::decode_config(seed.as_bytes(), base64::STANDARD_NO_PAD)
+            .expect("Failed to decode the seed")
+            .as_slice(),
+    )
+    .expect("Failed to parse the seed");
+
+    let (_, secret_key) = keypair_from_seed(&seed);
+
+    (secret_key, key_name)
 }
