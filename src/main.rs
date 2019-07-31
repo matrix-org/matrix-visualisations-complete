@@ -7,6 +7,7 @@ extern crate indolentjson;
 extern crate percent_encoding;
 extern crate r2d2_postgres;
 extern crate serde_derive;
+#[macro_use]
 extern crate serde_json;
 extern crate sodiumoxide;
 
@@ -18,6 +19,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::process::exit;
+use std::sync::{Arc, Mutex};
 
 use actix_web::{guard, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures_cpupool::CpuPool;
@@ -100,7 +102,8 @@ fn main() -> std::io::Result<()> {
             secret_key,
             key_name,
 
-            connected: false,
+            connected: Arc::new(Mutex::new(false)),
+            join_event: Arc::new(Mutex::new(None)),
         });
 
         HttpServer::new(move || {
