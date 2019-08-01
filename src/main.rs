@@ -125,7 +125,7 @@ fn main() -> std::io::Result<()> {
                 .service(
                     web::resource("/visualisations/deepest/{roomId}").to_async(federation_deepest),
                 )
-                .service(web::resource("/visualisations/stop").to_async(stop)) // FIXME: should be done when stopping the server
+                .service(web::resource("/visualisations/stop/{roomId}").to_async(stop)) // FIXME: should be done when stopping the server
                 .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(serv_cert))
         })
         .bind("127.0.0.1:8088")?
