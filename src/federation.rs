@@ -27,6 +27,37 @@ pub struct FederationData {
     pub join_event: Arc<Mutex<Option<JsonValue>>>,
 }
 
+#[derive(Default, Clone, Deserialize, Serialize)]
+struct Event {
+    room_id: String,       // Room identifier
+    sender: String,        // The ID of the user who has sent this event
+    origin: String,        // The `server_name` of the homeserver which created this event
+    origin_server_ts: i64, // Timestamp in milliseconds on origin homeserver when this event was created
+    #[serde(rename = "type")]
+    etype: String, // Event type
+    state_key: Option<String>, // Indicate whether this event is a state event
+    content: JsonValue,    // The content of the event
+    prev_events: Vec<JsonValue>, // Event IDs for the most recent events in the room that the homeserver was aware of when it made this event
+    pub depth: i64,              // The maximum depth of the `prev_events`, plus one
+    auth_events: Vec<JsonValue>, // Event IDs and reference hashes for the authorization events that would allow this event to be in the room
+    redacts: Option<String>,     // For redaction events, the ID of the event being redacted
+    unsigned: Option<JsonValue>, // Additional data added by the origin server but not covered by the `signatures`
+    pub event_id: String,        // The event ID
+    hashes: JsonValue, // Content hashes of the PDU, following the algorithm specified in `Signing Events`
+    signatures: JsonValue, // Signatures for the PDU, following the algorithm specified in `Signing Events`
+}
+
+#[derive(Clone, Deserialize)]
+pub struct RequestQuery {
+    from: String,
+    limit: Option<usize>,
+}
+
+#[derive(Clone, Serialize)]
+struct ResponseObject {
+    events: Vec<Event>,
+}
+
 #[derive(SerDerive)]
 struct RequestJson {
     method: String,
@@ -41,6 +72,13 @@ struct RequestJson {
 struct MakeJoinResponse {
     room_version: String,
     event: JsonValue,
+}
+
+#[derive(Debug, Deserialize, SerDerive)]
+struct BackfillResponse {
+    origin: String,
+    origin_server_ts: usize,
+    pdus: Vec<JsonValue>,
 }
 
 pub fn deepest(
@@ -223,7 +261,7 @@ pub fn stop(
                         },
                     ))
                 } else {
-                    future::Either::B(futures::future::err(actix_web::error::ErrorUnauthorized(
+                    future::Either::B(future::err(actix_web::error::ErrorUnauthorized(
                         "Unauthorized by the resident HS",
                     )))
                 }
@@ -294,6 +332,104 @@ pub fn stop(
                             .body("Leaving this room is forbidden"),
                     )
                 }
+            }),
+    )
+}
+
+pub fn ancestors(
+    (room_id, query, fd): (
+        web::Path<String>,
+        web::Query<RequestQuery>,
+        web::Data<FederationData>,
+    ),
+) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    let limit = query.limit.map_or(11, |n| n + 1);
+    let deepest_events: Vec<String> = query
+        .from
+        .as_str()
+        .split(',')
+        .map(|id| id.to_string())
+        .collect();
+    let v = deepest_events.iter().fold(String::new(), |id, acc| {
+        if acc.is_empty() {
+            format!("v={}", id)
+        } else {
+            format!("v={}&v={}", acc, id)
+        }
+    });
+
+    let client = Client::default();
+    let path = format!(
+        "/_matrix/federation/v1/backfill/{}?{}&limit={}",
+        room_id, v, limit,
+    );
+
+    Box::new(
+        client
+            .get(&format!("http://{}{}", fd.target_addr, path))
+            .header(
+                "Authorization",
+                request_json(
+                    "GET",
+                    &fd.server_name,
+                    &fd.secret_key,
+                    &fd.key_name,
+                    &fd.target_name,
+                    &path,
+                    None,
+                ),
+            )
+            .send()
+            .map_err(|err| {
+                actix_web::error::ErrorInternalServerError(format!(
+                    "Error sending /backfill: {}",
+                    err
+                ))
+            })
+            .and_then(move |mut response| {
+                if response.status().is_success() {
+                    future::Either::A(response.json::<BackfillResponse>().limit(1000000).map_err(
+                        |err| {
+                            actix_web::error::ErrorInternalServerError(format!(
+                                "Error making /backfill: {}",
+                                err
+                            ))
+                        },
+                    ))
+                } else {
+                    future::Either::B(future::err(actix_web::error::ErrorUnauthorized(
+                        "Unauthorized by the resident HS",
+                    )))
+                }
+            })
+            .and_then(move |json| {
+                let event_bodies: Vec<Event> = json
+                    .pdus
+                    .into_iter()
+                    .skip(1)
+                    .map(|json| {
+                        let ev: Event =
+                            serde_json::from_value(json).expect("Failed to deserialize Event");
+
+                        ev
+                    })
+                    .collect();
+
+                let response_object = ResponseObject {
+                    events: event_bodies,
+                };
+                let response_string = serde_json::to_string(&response_object)
+                    .expect("Failed to serialize the response object");
+
+                HttpResponse::Ok()
+                    .content_type("application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Methods", "GET, POST")
+                    .header(
+                        "Access-Control-Allow-Headers",
+                        "Origin, X-Requested-With, Content-Type, Accept",
+                    )
+                    .body(response_string)
             }),
     )
 }

@@ -26,6 +26,7 @@ use futures_cpupool::CpuPool;
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 use sodiumoxide::crypto::sign::ed25519::{keypair_from_seed, SecretKey, Seed};
 
+use crate::federation::ancestors as federation_ancestors;
 use crate::federation::deepest as federation_deepest;
 use crate::federation::FederationData;
 use crate::federation::{serv_cert, stop};
@@ -124,6 +125,10 @@ fn main() -> std::io::Result<()> {
                 )
                 .service(
                     web::resource("/visualisations/deepest/{roomId}").to_async(federation_deepest),
+                )
+                .service(
+                    web::resource("/visualisations/ancestors/{roomId}")
+                        .to_async(federation_ancestors),
                 )
                 .service(web::resource("/visualisations/stop/{roomId}").to_async(stop)) // FIXME: should be done when stopping the server
                 .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(serv_cert))
