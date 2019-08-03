@@ -28,8 +28,9 @@ use sodiumoxide::crypto::sign::ed25519::{keypair_from_seed, SecretKey, Seed};
 
 use crate::federation::ancestors as federation_ancestors;
 use crate::federation::deepest as federation_deepest;
+use crate::federation::serv_cert;
+use crate::federation::stop as federation_stop;
 use crate::federation::FederationData;
-use crate::federation::{serv_cert, stop};
 use crate::postgres::ancestors as pg_ancestors;
 use crate::postgres::deepest as pg_deepest;
 use crate::postgres::descendants as pg_descendants;
@@ -77,6 +78,16 @@ fn main() -> std::io::Result<()> {
                 .service(
                     web::resource("/visualisations/descendants/{roomId}").to_async(pg_descendants),
                 )
+                .service(web::resource("/visualisations/stop/{roomId}").to(|| {
+                    HttpResponse::Ok()
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Access-Control-Allow-Methods", "GET, POST")
+                        .header(
+                            "Access-Control-Allow-Headers",
+                            "Origin, X-Requested-With, Content-Type, Accept",
+                        )
+                        .body("No need to leave a room with the postgres backend")
+                }))
         })
         .bind("127.0.0.1:8088")?
         .run()
@@ -130,7 +141,7 @@ fn main() -> std::io::Result<()> {
                     web::resource("/visualisations/ancestors/{roomId}")
                         .to_async(federation_ancestors),
                 )
-                .service(web::resource("/visualisations/stop/{roomId}").to_async(stop)) // FIXME: should be done when stopping the server
+                .service(web::resource("/visualisations/stop/{roomId}").to_async(federation_stop))
                 .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(serv_cert))
         })
         .bind("127.0.0.1:8088")?
