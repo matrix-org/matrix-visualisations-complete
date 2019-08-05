@@ -5,11 +5,12 @@ authors = ["Eisha Chen-yen-su <chenyensu0@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-actix-web = "1.0"
+actix-web = { version = "1.0", features = ["ssl"] }
 awc = "0.2.2"
 base64 = "0.10.1"
 futures = "0.1"
 futures-cpupool = "0.1"
+openssl = { version = "0.10", features = ["v110"] }
 percent-encoding = "1.0.1"
 r2d2 = "0.8"
 r2d2_postgres = "0.14"

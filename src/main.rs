@@ -4,6 +4,7 @@ extern crate base64;
 extern crate futures;
 extern crate futures_cpupool;
 extern crate indolentjson;
+extern crate openssl;
 extern crate percent_encoding;
 extern crate r2d2_postgres;
 extern crate serde_derive;
@@ -23,6 +24,7 @@ use std::sync::{Arc, Mutex};
 
 use actix_web::{guard, web, App, HttpRequest, HttpResponse, HttpServer};
 use futures_cpupool::CpuPool;
+use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
 use r2d2_postgres::{PostgresConnectionManager, TlsMode};
 use sodiumoxide::crypto::sign::ed25519::{keypair_from_seed, SecretKey, Seed};
 
@@ -43,6 +45,15 @@ fn main() -> std::io::Result<()> {
         eprintln!("Usage: cargo run --release [postgres / federation]");
         exit(-1);
     }
+
+    let mut ssl_builder =
+        SslAcceptor::mozilla_intermediate(SslMethod::tls()).expect("Failed to create SSL builder");
+    ssl_builder
+        .set_private_key_file("key.pem", SslFiletype::PEM)
+        .expect("Failed to load TLS private key");
+    ssl_builder
+        .set_certificate_chain_file("cert.pem")
+        .expect("Failed to load TLS certificate");
 
     if args[1] == "postgres" {
         println!("Backend in postgres mode");
@@ -89,7 +100,7 @@ fn main() -> std::io::Result<()> {
                         .body("No need to leave a room with the postgres backend")
                 }))
         })
-        .bind("127.0.0.1:8088")?
+        .bind_ssl("127.0.0.1:8482", ssl_builder)?
         .run()
     } else if args[1] == "federation" {
         if args.len() < 6 {
@@ -144,7 +155,7 @@ fn main() -> std::io::Result<()> {
                 .service(web::resource("/visualisations/stop/{roomId}").to_async(federation_stop))
                 .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(serv_cert))
         })
-        .bind("127.0.0.1:8088")?
+        .bind_ssl("127.0.0.1:8482", ssl_builder)?
         .run()
     } else {
         eprintln!("Unknown mode");
