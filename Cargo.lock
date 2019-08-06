@@ -883,6 +883,7 @@ dependencies = [
  "actix-web 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "awc 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "base64 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.27 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-cpupool 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "indolentjson 0.1.0 (git+https://github.com/NegativeMjark/indolentjson-rust.git)",
