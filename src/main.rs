@@ -30,6 +30,7 @@ use sodiumoxide::crypto::sign::ed25519::{keypair_from_seed, SecretKey, Seed};
 
 use crate::federation::ancestors as federation_ancestors;
 use crate::federation::deepest as federation_deepest;
+use crate::federation::descendants as federation_descendants;
 use crate::federation::serv_cert;
 use crate::federation::stop as federation_stop;
 use crate::federation::FederationData;
@@ -151,6 +152,10 @@ fn main() -> std::io::Result<()> {
                 .service(
                     web::resource("/visualisations/ancestors/{roomId}")
                         .to_async(federation_ancestors),
+                )
+                .service(
+                    web::resource("/visualisations/descendants/{roomId}")
+                        .to_async(federation_descendants),
                 )
                 .service(web::resource("/visualisations/stop/{roomId}").to_async(federation_stop))
                 .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(serv_cert))

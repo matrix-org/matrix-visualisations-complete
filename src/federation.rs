@@ -434,6 +434,26 @@ pub fn ancestors(
     )
 }
 
+pub fn descendants(
+    (room_id, query, fd): (
+        web::Path<String>,
+        web::Query<RequestQuery>,
+        web::Data<FederationData>,
+    ),
+) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    Box::new(futures::future::ok(
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body("{\"events\":[]}"),
+    ))
+}
+
 pub fn serv_cert(_: web::Path<String>) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
     println!("Key requested");
 
