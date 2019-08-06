@@ -111,7 +111,8 @@ fn main() -> std::io::Result<()> {
 
         println!("Backend in federation mode");
 
-        let (secret_key, key_name) = key_info(&format!("{}.signing.key", args[4].clone()));
+        let (public_key, secret_key, key_name) =
+            key_info(&format!("{}.signing.key", args[4].clone()));
 
         let cpu_pool = CpuPool::new_num_cpus();
 
@@ -123,6 +124,7 @@ fn main() -> std::io::Result<()> {
 
             server_name: args[4].clone(),
             username: args[5].clone(),
+            public_key,
             secret_key,
             key_name,
 
@@ -168,7 +170,7 @@ fn main() -> std::io::Result<()> {
     }
 }
 
-fn key_info(path: &str) -> (SecretKey, String) {
+fn key_info(path: &str) -> (String, SecretKey, String) {
     let file = File::open(path).expect("Failed to open the signing key's file");
     let mut buf_reader = BufReader::new(file);
     let mut contents = String::new();
@@ -201,7 +203,8 @@ fn key_info(path: &str) -> (SecretKey, String) {
     )
     .expect("Failed to parse the seed");
 
-    let (_, secret_key) = keypair_from_seed(&seed);
+    let (public_key, secret_key) = keypair_from_seed(&seed);
+    let public_key = base64::encode_config(public_key.as_ref(), base64::STANDARD_NO_PAD);
 
-    (secret_key, key_name)
+    (public_key, secret_key, key_name)
 }

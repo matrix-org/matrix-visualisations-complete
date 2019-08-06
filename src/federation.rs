@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use actix_web::{web, Error, HttpResponse};
 use awc::Client;
+use chrono::{Duration, Utc};
 use futures::{future, Future};
 use futures_cpupool::CpuPool;
 use serde::Serialize;
@@ -20,6 +21,7 @@ pub struct FederationData {
 
     pub server_name: String,
     pub username: String,
+    pub public_key: String,
     pub secret_key: SecretKey,
     pub key_name: String,
 
@@ -79,6 +81,15 @@ struct BackfillResponse {
     origin: String,
     origin_server_ts: usize,
     pdus: Vec<JsonValue>,
+}
+
+#[derive(Debug, Deserialize, SerDerive)]
+struct ServerKeys {
+    server_name: String,
+    verify_keys: JsonValue,
+    old_verify_keys: JsonValue,
+    signatures: JsonValue,
+    valid_until_ts: u64,
 }
 
 pub fn deepest(
@@ -454,14 +465,68 @@ pub fn descendants(
     ))
 }
 
-pub fn serv_cert(_: web::Path<String>) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
-    println!("Key requested");
+pub fn serv_cert(
+    (_, fd): (web::Path<String>, web::Data<FederationData>),
+) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    let server_name = fd.server_name.clone();
+    let key_name = fd.key_name.clone();
+    let public_key = fd.public_key.clone();
+    let valid_until_ts = (Utc::now() + Duration::days(1)).timestamp_millis() as u64;
+    let sig = server_keys_signature(
+        &server_name,
+        &key_name,
+        &public_key,
+        valid_until_ts,
+        &fd.secret_key,
+    );
+
+    let server_keys = ServerKeys {
+        server_name,
+        verify_keys: json!({
+            key_name.clone(): {
+                "key": public_key
+            }
+        }),
+        old_verify_keys: json!({}),
+        signatures: json!({
+            fd.server_name.clone(): {
+                key_name: sig
+            }
+        }),
+        valid_until_ts,
+    };
+
+    let response_string =
+        serde_json::to_string(&server_keys).expect("Failed to serialize the server keys");
 
     Box::new(futures::future::ok(
         HttpResponse::Ok()
             .content_type("application/json")
-            .body("The cert of the server"),
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body(response_string),
     ))
+}
+
+fn server_keys_signature(
+    server_name: &str,
+    key_name: &str,
+    public_key: &str,
+    valid_until_ts: u64,
+    signing_key: &SecretKey,
+) -> String {
+    let obj = json!({
+        "server_name": server_name.clone(),
+        "verify_keys": { key_name.clone(): { "key": public_key.clone() } },
+        "old_verify_keys": {},
+        "valid_until_ts": valid_until_ts
+    });
+
+    event_signature(&obj, signing_key)
 }
 
 fn event_signature(event_object: &JsonValue, signing_key: &SecretKey) -> String {
