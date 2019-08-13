@@ -327,7 +327,9 @@ pub fn stop(
             })
             .and_then(move |response| {
                 if response.status().is_success() {
-                    *fd_clone.connected.lock().unwrap() = true;
+                    *fd_clone.connected.lock().unwrap() = false;
+                    *fd_clone.join_event.lock().unwrap() = None;
+                    fd_clone.new_events.lock().unwrap().clear();
 
                     future::ok(
                         HttpResponse::Ok()
