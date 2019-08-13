@@ -456,13 +456,29 @@ pub fn ancestors(
 }
 
 pub fn descendants(
-    (room_id, query, fd): (
+    (_, _, fd): (
         web::Path<String>,
         web::Query<RequestQuery>,
         web::Data<FederationData>,
     ),
 ) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
-    Box::new(futures::future::ok(
+    let new_events: Vec<Event> = fd
+        .new_events
+        .lock()
+        .unwrap()
+        .drain(..)
+        .map(|json| {
+            let ev: Event = serde_json::from_value(json).expect("Failed to deserialize Event");
+
+            ev
+        })
+        .collect();
+
+    let response_object = ResponseObject { events: new_events };
+    let response_string =
+        serde_json::to_string(&response_object).expect("Failed to serialize the response object");
+
+    Box::new(future::ok(
         HttpResponse::Ok()
             .content_type("application/json")
             .header("Access-Control-Allow-Origin", "*")
@@ -471,7 +487,7 @@ pub fn descendants(
                 "Access-Control-Allow-Headers",
                 "Origin, X-Requested-With, Content-Type, Accept",
             )
-            .body("{\"events\":[]}"),
+            .body(response_string),
     ))
 }
 
