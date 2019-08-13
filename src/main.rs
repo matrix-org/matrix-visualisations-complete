@@ -58,11 +58,20 @@ fn main() -> std::io::Result<()> {
         .expect("Failed to load TLS certificate");
 
     if args[1] == "postgres" {
+        if args.len() < 5 {
+            eprintln!("Usage: cargo run --release postgres <db_addr> <db_username> <db_name>");
+            exit(-1);
+        }
+
+        let db_username = args[3].clone();
+        let db_addr = args[2].clone();
+        let db_name = args[4].clone();
+
         println!("Backend in postgres mode");
 
         let cpu_pool = CpuPool::new_num_cpus();
         let manager = PostgresConnectionManager::new(
-            "postgres://synapse_user@localhost/synapse",
+            format!("postgres://{}@{}/{}", db_username, db_addr, db_name).as_str(),
             TlsMode::None,
         )
         .unwrap();
