@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use actix_web::{web, Error, HttpResponse};
@@ -27,6 +28,7 @@ pub struct FederationData {
 
     pub connected: Arc<Mutex<bool>>,
     pub join_event: Arc<Mutex<Option<JsonValue>>>,
+    pub new_events: Arc<Mutex<Vec<JsonValue>>>,
 }
 
 #[derive(Default, Clone, Deserialize, Serialize)]
@@ -90,6 +92,14 @@ struct ServerKeys {
     old_verify_keys: JsonValue,
     signatures: JsonValue,
     valid_until_ts: u64,
+}
+
+#[derive(Debug, Deserialize, SerDerive)]
+pub struct PushRequest {
+    origin: String,
+    origin_server_ts: u64,
+    pdus: Vec<JsonValue>,
+    edus: Option<JsonValue>,
 }
 
 pub fn deepest(
@@ -500,6 +510,47 @@ pub fn serv_cert(
         serde_json::to_string(&server_keys).expect("Failed to serialize the server keys");
 
     Box::new(futures::future::ok(
+        HttpResponse::Ok()
+            .content_type("application/json")
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Access-Control-Allow-Methods", "GET, POST")
+            .header(
+                "Access-Control-Allow-Headers",
+                "Origin, X-Requested-With, Content-Type, Accept",
+            )
+            .body(response_string),
+    ))
+}
+
+pub fn push(
+    (_, json, fd): (
+        web::Path<String>,
+        web::Json<PushRequest>,
+        web::Data<FederationData>,
+    ),
+) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    let mut new_events = fd.new_events.lock().unwrap();
+    let mut new_ids = Vec::new();
+
+    for ev in json.pdus.clone() {
+        let id = ev["event_id"].to_string();
+        let id = id.trim_matches('"').to_string();
+        new_ids.push(id);
+        new_events.push(ev);
+    }
+
+    let mut ids = HashMap::new();
+
+    for id in new_ids {
+        ids.insert(id, json!({}));
+    }
+
+    let response_object = json!({ "pdus": ids });
+
+    let response_string =
+        serde_json::to_string(&response_object).expect("Failed to serialize the response object");
+
+    Box::new(future::ok(
         HttpResponse::Ok()
             .content_type("application/json")
             .header("Access-Control-Allow-Origin", "*")

@@ -31,6 +31,7 @@ use sodiumoxide::crypto::sign::ed25519::{keypair_from_seed, SecretKey, Seed};
 use crate::federation::ancestors as federation_ancestors;
 use crate::federation::deepest as federation_deepest;
 use crate::federation::descendants as federation_descendants;
+use crate::federation::push as federation_push;
 use crate::federation::serv_cert;
 use crate::federation::stop as federation_stop;
 use crate::federation::FederationData;
@@ -130,6 +131,7 @@ fn main() -> std::io::Result<()> {
 
             connected: Arc::new(Mutex::new(false)),
             join_event: Arc::new(Mutex::new(None)),
+            new_events: Arc::new(Mutex::new(Vec::new())),
         });
 
         HttpServer::new(move || {
@@ -161,6 +163,10 @@ fn main() -> std::io::Result<()> {
                 )
                 .service(web::resource("/visualisations/stop/{roomId}").to_async(federation_stop))
                 .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(serv_cert))
+                .route(
+                    "/_matrix/federation/v1/send/{txnId}",
+                    web::route().guard(guard::Put()).to_async(federation_push),
+                )
         })
         .bind_ssl("127.0.0.1:8482", ssl_builder)?
         .run()
