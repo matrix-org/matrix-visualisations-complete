@@ -31,7 +31,7 @@ pub struct FederationData {
     pub new_events: Arc<Mutex<Vec<JsonValue>>>,
 }
 
-#[derive(Default, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 struct Event {
     room_id: String,       // Room identifier
     sender: String,        // The ID of the user who has sent this event
@@ -83,6 +83,12 @@ struct BackfillResponse {
     origin: String,
     origin_server_ts: usize,
     pdus: Vec<JsonValue>,
+}
+
+#[derive(Debug, Deserialize, SerDerive)]
+struct StateResponse {
+    auth_chain: Vec<Event>,
+    pdus: Vec<Event>,
 }
 
 #[derive(Debug, Deserialize, SerDerive)]
@@ -491,6 +497,78 @@ pub fn descendants(
             )
             .body(response_string),
     ))
+}
+
+pub fn state(
+    (room_id, query, fd): (
+        web::Path<String>,
+        web::Query<RequestQuery>,
+        web::Data<FederationData>,
+    ),
+) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    let from_event = &query.from;
+
+    let client = Client::default();
+    let path = format!(
+        "/_matrix/federation/v1/state/{}?event_id={}",
+        room_id, from_event,
+    );
+
+    Box::new(
+        client
+            .get(&format!("http://{}{}", fd.target_addr, path))
+            .header(
+                "Authorization",
+                request_json(
+                    "GET",
+                    &fd.server_name,
+                    &fd.secret_key,
+                    &fd.key_name,
+                    &fd.target_name,
+                    &path,
+                    None,
+                ),
+            )
+            .send()
+            .map_err(|err| {
+                actix_web::error::ErrorInternalServerError(format!("Error sending /state: {}", err))
+            })
+            .and_then(move |mut response| {
+                if response.status().is_success() {
+                    future::Either::A(response.json::<StateResponse>().limit(1000000).map_err(
+                        |err| {
+                            actix_web::error::ErrorInternalServerError(format!(
+                                "Error making /state: {}",
+                                err
+                            ))
+                        },
+                    ))
+                } else {
+                    future::Either::B(future::err(actix_web::error::ErrorUnauthorized(
+                        "Unauthorized by the resident HS",
+                    )))
+                }
+            })
+            .and_then(move |json| {
+                let event_bodies: Vec<Event> = json.pdus.into_iter().collect();
+
+                let response_object = ResponseObject {
+                    events: event_bodies,
+                };
+                let response_string = serde_json::to_string(&response_object)
+                    .expect("Failed to serialize the response object");
+
+                HttpResponse::Ok()
+                    .content_type("application/json")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Methods", "GET, POST")
+                    .header(
+                        "Access-Control-Allow-Headers",
+                        "Origin, X-Requested-With, Content-Type, Accept",
+                    )
+                    .body(response_string)
+            }),
+    )
 }
 
 pub fn serv_cert(

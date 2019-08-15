@@ -33,6 +33,7 @@ use crate::federation::deepest as federation_deepest;
 use crate::federation::descendants as federation_descendants;
 use crate::federation::push as federation_push;
 use crate::federation::serv_cert;
+use crate::federation::state as federation_state;
 use crate::federation::stop as federation_stop;
 use crate::federation::FederationData;
 use crate::postgres::ancestors as pg_ancestors;
@@ -170,6 +171,7 @@ fn main() -> std::io::Result<()> {
                     web::resource("/visualisations/descendants/{roomId}")
                         .to_async(federation_descendants),
                 )
+                .service(web::resource("/visualisations/state/{roomId}").to_async(federation_state))
                 .service(web::resource("/visualisations/stop/{roomId}").to_async(federation_stop))
                 .service(web::resource("/_matrix/key/v2/server/{keyId}").to_async(serv_cert))
                 .route(
