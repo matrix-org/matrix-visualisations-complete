@@ -39,6 +39,7 @@ use crate::federation::FederationData;
 use crate::postgres::ancestors as pg_ancestors;
 use crate::postgres::deepest as pg_deepest;
 use crate::postgres::descendants as pg_descendants;
+use crate::postgres::state as pg_state;
 use crate::postgres::Database;
 
 fn main() -> std::io::Result<()> {
@@ -101,6 +102,7 @@ fn main() -> std::io::Result<()> {
                 .service(
                     web::resource("/visualisations/descendants/{roomId}").to_async(pg_descendants),
                 )
+                .service(web::resource("/visualisations/state/{roomId}").to_async(pg_state))
                 .service(web::resource("/visualisations/stop/{roomId}").to(|| {
                     HttpResponse::Ok()
                         .header("Access-Control-Allow-Origin", "*")

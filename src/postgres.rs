@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use actix_web::{web, Error, HttpResponse};
+use futures::future;
 use futures::Future;
 use futures_cpupool::CpuPool;
 use r2d2::Pool;
@@ -263,6 +264,84 @@ pub fn descendants(
     )
 }
 
+pub fn state(
+    (path, query, db): (
+        web::Path<String>,
+        web::Query<RequestQuery>,
+        web::Data<Database>,
+    ),
+) -> Box<dyn Future<Item = HttpResponse, Error = Error>> {
+    let from_event = &query.from;
+    let db_clone = db.clone();
+
+    if !room_exists(&path, &db.pg_pool) {
+        return Box::new(futures::future::ok(
+            HttpResponse::NotFound()
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Access-Control-Allow-Methods", "GET, POST")
+                .header(
+                    "Access-Control-Allow-Headers",
+                    "Origin, X-Requested-With, Content-Type, Accept",
+                )
+                .body("This room doesn't exist"),
+        ));
+    }
+
+    Box::new(
+        get_state_group(&db.cpu_pool, &db.pg_pool, from_event)
+            .map_err(|err| {
+                actix_web::error::ErrorInternalServerError(format!(
+                    "Error with the database: {}",
+                    err
+                ))
+            })
+            .and_then(move |state_group| match state_group {
+                Some(sg) => future::Either::A(
+                    get_state_event_ids(&db_clone.cpu_pool, &db_clone.pg_pool, sg).map_err(|err| {
+                        actix_web::error::ErrorInternalServerError(format!(
+                            "Error with the database: {}",
+                            err
+                        ))
+                    }),
+                ),
+                None => future::Either::B(future::err(actix_web::error::ErrorNotFound(
+                    "There is no such event",
+                ))),
+            })
+            .and_then(move |event_ids| {
+                let event_bodies: Vec<Event> = event_ids
+                    .iter()
+                    .map(|id| {
+                        let ev: Event = serde_json::from_value(
+                            get_json(id, &db.pg_pool).expect("Failed to get event's JSON"),
+                        )
+                        .expect("Failed to deserialize Event");
+
+                        ev
+                    })
+                    .collect();
+
+                let response_object = ResponseObject {
+                    events: event_bodies,
+                };
+                let response_string = serde_json::to_string(&response_object)
+                    .expect("Failed to serialize the response object");
+
+                future::ok(
+                    HttpResponse::Ok()
+                        .content_type("application/json")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .header("Access-Control-Allow-Methods", "GET, POST")
+                        .header(
+                            "Access-Control-Allow-Headers",
+                            "Origin, X-Requested-With, Content-Type, Accept",
+                        )
+                        .body(response_string),
+                )
+            }),
+    )
+}
+
 // Makes a request to the database to check whether the room `room_id` exists
 fn room_exists(room_id: &str, pg_pool: &Pool<PostgresConnectionManager>) -> bool {
     let pool = pg_pool.clone();
@@ -412,6 +491,71 @@ fn get_descendants_events(
         }
 
         Ok(event_results)
+    });
+
+    f
+}
+
+fn get_state_group(
+    cpu_pool: &CpuPool,
+    pg_pool: &Pool<PostgresConnectionManager>,
+    event: &str,
+) -> impl Future<Item = Option<i64>, Error = PgError> {
+    let pool = pg_pool.clone();
+    let event = event.to_string();
+
+    let f = cpu_pool.spawn_fn(move || -> Result<_, PgError> {
+        let client = pool.get().unwrap();
+
+        let state_group: Option<i64> = client
+            .query(
+                "SELECT state_group FROM event_to_state_groups WHERE event_id = $1",
+                &[&event],
+            )
+            .unwrap()
+            .iter()
+            .next()
+            .map(|row| row.get("state_group"));
+
+        Ok(state_group)
+    });
+
+    f
+}
+
+fn get_state_event_ids(
+    cpu_pool: &CpuPool,
+    pg_pool: &Pool<PostgresConnectionManager>,
+    state_group: i64,
+) -> impl Future<Item = Vec<String>, Error = PgError> {
+    let pool = pg_pool.clone();
+
+    let f = cpu_pool.spawn_fn(move || -> Result<_, PgError> {
+        let client = pool.get().unwrap();
+
+        let event_ids: Vec<String> = client
+            .query(
+                "WITH RECURSIVE state(state_group) AS (
+                    VALUES($1::bigint)
+                    UNION ALL
+                    SELECT prev_state_group FROM state_group_edges e, state s
+                    WHERE s.state_group = e.state_group
+                )
+                SELECT DISTINCT type, state_key, last_value(event_id) OVER (
+                    PARTITION BY type, state_key ORDER BY state_group ASC
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+                ) AS event_id FROM state_groups_state
+                WHERE state_group IN (
+                    SELECT state_group FROM state
+                )",
+                &[&state_group],
+            )
+            .unwrap()
+            .iter()
+            .map(|row| row.get("event_id"))
+            .collect();
+
+        Ok(event_ids)
     });
 
     f
