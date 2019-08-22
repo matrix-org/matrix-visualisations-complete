@@ -1,0 +1,32 @@
+.to-hide {
+    display: none;
+}
+
+.view {
+    padding: 6px;
+    display: grid;
+    grid-template-columns: 800px 700px;
+    grid-gap: 12px;
+}
+
+#dag-vis {
+    width: 800px;
+    height: 900px;
+    border: 1px solid lightgray;
+
+    grid-column: 1;
+}
+
+#event-body {
+    width: 700px;
+    height: 900px;
+    padding: 6px;
+    background-color: lightblue;
+    overflow: auto;
+
+    grid-column: 2;
+}
+
+#room-state {
+    background-color: darksalmon;
+}
